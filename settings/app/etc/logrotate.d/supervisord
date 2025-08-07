@@ -1,0 +1,15 @@
+${EFS_APPLICATION_MOUNT_PATH}/logs/supervisor/*log {
+    size 1M
+    create 644 1000 1000
+    daily
+    rotate 7
+    missingok
+    notifempty
+    compress
+    delaycompress
+    sharedscripts
+    postrotate
+        /opt/pyenv/shims/supervisorctl reread > /dev/null 2>&1 || true
+        /opt/pyenv/shims/supervisorctl update > /dev/null 2>&1 || true
+    endscript
+}

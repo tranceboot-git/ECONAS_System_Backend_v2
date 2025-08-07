@@ -1,0 +1,32 @@
+# Project
+.docker_volumes/
+.dockertmp/
+!logs/
+*.log
+*.log.*
+*.tar.*
+node_modules/
+vendor/
+
+# Mac OS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# IDE
+.idea/
+
+# Environments
+.env
+.venv
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/

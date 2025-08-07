@@ -1,0 +1,167 @@
+# ------------------------------------------------------------------------------
+# ECONAS
+# ログルーターコンテナ 本番イメージ（x86_64)
+#
+#
+# Appleシリコンからイメージをビルド
+# docker buildx build --load --no-cache --platform linux/amd64 -t econas-log-router:1.0-x86_64 -f Dockerfile.1.0.x86_64 .
+#
+# ------------------------------------------------------------------------------
+
+
+FROM public.ecr.aws/aws-observability/aws-for-fluent-bit:2.32.5.20250327
+# FROM --platform=linux/amd64 public.ecr.aws/aws-observability/aws-for-fluent-bit:2.32.5.20250327
+
+
+# -----------------------------------------------------------------------------
+# 引数
+#
+
+
+# イメージのビルドで使用する引数
+ARG LUA_VERSION=5.1.5
+ARG LUA_SHA256="2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333"
+ARG LUAROCKS_VERSION=3.9.2
+
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+
+# その他の引数
+ARG ECS_CLUSTER_NAME
+ARG ECS_SERVICE_NAME
+ARG EFS_APPLICATION_MOUNT_PATH=/efs
+ARG FLUENT_BIT_LOG_LEVEL=info
+ARG REGION=ap-northeast-1
+ARG CLOUDWATCH_LOG_GROUP_ID
+ARG FIREHOSE_HTTPD_STREAM_ID
+ARG FIREHOSE_APP_STREAM_ID
+
+
+# -----------------------------------------------------------------------------
+# 環境変数
+#
+
+
+ENV \
+    USER_ID=${USER_ID} \
+    GROUP_ID=${GROUP_ID} \
+    \
+    ECS_CLUSTER_NAME=${ECS_CLUSTER_NAME} \
+    ECS_SERVICE_NAME=${ECS_SERVICE_NAME} \
+    EFS_APPLICATION_MOUNT_PATH=${EFS_APPLICATION_MOUNT_PATH} \
+    FLUENT_BIT_LOG_LEVEL=${FLUENT_BIT_LOG_LEVEL} \
+    REGION=${REGION} \
+    CLOUDWATCH_LOG_GROUP_ID=${CLOUDWATCH_LOG_GROUP_ID} \
+    FIREHOSE_HTTPD_STREAM_ID=${FIREHOSE_HTTPD_STREAM_ID} \
+    FIREHOSE_APP_STREAM_ID=${FIREHOSE_APP_STREAM_ID}
+
+
+# -----------------------------------------------------------------------------
+#
+
+
+# 必要なパッケージのインストールとクリーンアップ
+RUN set -eux \
+    && yum update -y \
+    && yum groupinstall -y "Development Tools" \
+    && yum install -y readline-devel \
+    && yum clean all \
+    && rm -rf /var/cache/yum
+
+
+# Lua のインストール
+WORKDIR /root
+RUN set -eux; \
+    curl -fsSL --proto '=https' --tlsv1.2 https://lua.org/ftp/lua-${LUA_VERSION}.tar.gz -o lua.tar.gz && \
+    echo "${LUA_SHA256} lua.tar.gz" | sha256sum -c - && \
+    tar -xzf lua.tar.gz && \
+    cd lua-${LUA_VERSION} && \
+    make linux test && \
+    make install && \
+    cd .. && \
+    rm -rf lua-${LUA_VERSION} lua-${LUA_VERSION}.tar.gz
+
+
+# LuaRocks のインストール
+WORKDIR /root
+RUN set -eux; \
+    curl -fsSL --proto '=https' --tlsv1.2 https://luarocks.github.io/luarocks/releases/luarocks-${LUAROCKS_VERSION}.tar.gz -o luarocks.tar.gz && \
+    tar -xzvf luarocks.tar.gz && \
+    cd luarocks-${LUAROCKS_VERSION} && \
+    ./configure --with-lua-include=/usr/local/include && \
+    make && \
+    make install && \
+    cd .. && \
+    rm -rf luarocks-${LUAROCKS_VERSION} luarocks.tar.gz
+
+
+WORKDIR /
+
+
+# Luaライブラリのインストール
+RUN set -eux; \
+    luarocks install luautf8 && \
+    luarocks install lua-cjson
+
+
+# 設定ファイルのコピー
+COPY ./settings/logrouter/fluent-bit/prod.custom_parsers.conf /fluent-bit/etc/custom_parsers.conf
+COPY ./settings/logrouter/fluent-bit/prod.extra.conf /fluent-bit/etc/extra.conf
+
+
+# スクリプトのコピー
+COPY ./settings/logrouter/fluent-bit/prod.script.lua /fluent-bit/conf/script.lua
+RUN set -eux; \
+    chmod 644 /fluent-bit/conf/script.lua
+
+
+# 開発ツールの削除
+RUN set -eux; \
+    yum groupremove -y "Development Tools" && \
+    yum clean all && \
+    rm -rf /var/cache/yum
+
+
+# 非rootユーザーの作成と使用
+RUN groupadd -g ${GROUP_ID} fluent && \
+    useradd -r -u ${USER_ID} -g fluent -s /sbin/nologin fluent && \
+    chown -R fluent:fluent /fluent-bit/etc/ /fluent-bit/conf/
+
+
+# ボリュームマウントポイントの作成と権限設定
+RUN mkdir -p ${EFS_APPLICATION_MOUNT_PATH} && \
+    chown ${USER_ID}:${GROUP_ID} ${EFS_APPLICATION_MOUNT_PATH}
+
+
+# ログローテーション設定の追加
+RUN mkdir -p /fluent-bit/log && \
+    chown fluent:fluent /fluent-bit/log
+
+
+RUN mkdir -p /etc/logrotate.d && \
+    echo "/fluent-bit/log/*.log {\n\
+    daily\n\
+    rotate 7\n\
+    compress\n\
+    delaycompress\n\
+    missingok\n\
+    notifempty\n\
+    create 644 fluent fluent\n\
+}" > /etc/logrotate.d/fluent-bit
+
+
+# エントリーポイントのスクリプトをコピー
+COPY ./settings/logrouter/prod.entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && \
+    chown fluent:fluent /entrypoint.sh
+
+
+# ヘルスチェック用のスクリプト
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD curl -f http://127.0.0.1:2020/api/v1/health > /dev/null 2>&1 || exit 1
+
+
+USER fluent
+
+
+ENTRYPOINT ["/entrypoint.sh"]

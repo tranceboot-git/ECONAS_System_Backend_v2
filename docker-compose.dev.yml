@@ -1,0 +1,149 @@
+services:
+  backend2_init_container:
+    build:
+      context: .
+      target: init_container
+      dockerfile: ./Dockerfile.app.1.1
+      args:
+        - SSL_ENABLED=false
+        - WORKER_MODE=false
+        - USER_NAME=root
+        - USER_ID=0
+        - GROUP_ID=0
+        - DOCUMENT_ROOT_PATH=/var/app/source/public
+        - APP_DIRECTORY_PATH=/var/app/source
+        - APP_ENV_PATH=/tmp/app
+        - EFS_SETTINGS_MOUNT_PATH=/efs_settings
+        - EFS_APPLICATION_MOUNT_PATH=/efs
+        - EPHEMERAL_STORAGE_TMP_PATH=/tmp
+        - DOMAIN_NAME=localhost
+        - ADMIN_EMAIL=ito@tranceboot.com
+        - HTTPD_LOG_LEVEL=debug
+    networks:
+      - econas-network
+    volumes:
+      - backend2_ephemeral_storage_tmp:/tmp
+      - backend2_efs_application:/efs
+
+  backend2_dev_volume_permissions:
+    image: busybox:latest
+    user: "0:0"
+    command: >
+      sh -c "
+        echo 'Setting up volume permissions...' &&
+        chown -R ${DOCKER_HOST_USER_ID:-1000}:${DOCKER_HOST_GROUP_ID:-1000} /tmp &&
+        chmod 777 /tmp &&
+        chown -R ${DOCKER_HOST_USER_ID:-1000}:${DOCKER_HOST_GROUP_ID:-1000} /efs &&
+        chmod 777 /efs &&
+        echo 'Volume permissions set successfully'
+      "
+    environment:
+      - DOCKER_HOST_USER_ID=${DOCKER_HOST_USER_ID:-1000}
+      - DOCKER_HOST_GROUP_ID=${DOCKER_HOST_GROUP_ID:-1000}
+    depends_on:
+      backend2_init_container:
+        condition: service_completed_successfully
+    volumes:
+      - backend2_ephemeral_storage_tmp:/tmp
+      - backend2_efs_application:/efs
+    networks:
+      - econas-network
+
+  backend2_app:
+    container_name: 'backend2_econas_app'
+    user: "$DOCKER_HOST_USER_ID:$DOCKER_HOST_GROUP_ID"
+    build:
+      context: .
+      target: dev_app
+      dockerfile: ./Dockerfile.app.1.1
+      args:
+        - SSL_ENABLED=false
+        - WORKER_MODE=false
+        - USER_NAME=$DOCKER_HOST_USER_NAME
+        - USER_ID=$DOCKER_HOST_USER_ID
+        - GROUP_ID=$DOCKER_HOST_GROUP_ID
+        - DOCUMENT_ROOT_PATH=/var/app/source/public
+        - APP_DIRECTORY_PATH=/var/app/source
+        - APP_ENV_PATH=/tmp/app
+        - EFS_SETTINGS_MOUNT_PATH=/efs_settings
+        - EFS_APPLICATION_MOUNT_PATH=/efs
+        - EPHEMERAL_STORAGE_TMP_PATH=/tmp
+        - DOMAIN_NAME=localhost
+        - ADMIN_EMAIL=ito@tranceboot.com
+        - HTTPD_LOG_LEVEL=debug
+    environment:
+      - HTTPD_LOG_LEVEL=debug
+      - APP_NAME=電力制御ツール
+      - APP_URL=http://localhost:8080
+      - LARAVEL_APP_KEY=$LARAVEL_APP_KEY
+      - APP_DEBUG=true
+      - APP_ENV=dev
+      - DB_CONNECTION=mysql
+      - DB_HOST=backend2_db1
+      - DB_PORT=3306
+      - DB_DATABASE=dcsdb
+      - DB_USERNAME=st-user
+      - DB_PASSWORD=m8id5xc3
+      - MAIL_MAILER=smtp
+      - MAIL_HOST=email-smtp.ap-northeast-1.amazonaws.com
+      - MAIL_PORT=587
+      - MAIL_USERNAME=$MAIL_USERNAME
+      - MAIL_PASSWORD=$MAIL_PASSWORD
+      - MAIL_ENCRYPTION=tls
+      - MAIL_FROM_ADDRESS=no-reply@em1.demand-control.com
+      - MAIL_FROM_NAME=電力制御ツール
+      - AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+      - AWS_DEFAULT_REGION=ap-northeast-1
+      - SQS_DEFAULT_QUEUE=https://sqs.ap-northeast-1.amazonaws.com/099935470236/econas-dev1-default-queue
+      - SQS_EMAIL_QUEUE=https://sqs.ap-northeast-1.amazonaws.com/099935470236/econas-dev1-email-queue
+      - SQS_NOTIFICATION_QUEUE=https://sqs.ap-northeast-1.amazonaws.com/099935470236/econas-dev1-notification-queue
+      - SQS_REPORT_QUEUE=https://sqs.ap-northeast-1.amazonaws.com/099935470236/econas-dev1-report-queue
+      - SQS_FILE_PROCESSING_QUEUE=https://sqs.ap-northeast-1.amazonaws.com/099935470236/econas-dev1-file-processing-queue
+      - SQS_BATCH_QUEUE=https://sqs.ap-northeast-1.amazonaws.com/099935470236/econas-dev1-batch-queue
+      - SANCTUM_STATEFUL_DOMAINS=localhost:3000,127.0.0.1:3000,econas_mc_front:3000
+      - FRONTEND_URLS=http://localhost:3000,http://127.0.0.1:3000,http://econas_mc_front:3000
+    networks:
+      - econas-network
+    ports:
+      - "8080:8080"
+    volumes:
+      - backend2_ephemeral_storage_tmp:/tmp
+      - backend2_efs_application:/efs
+      - .:/var/app
+    working_dir: /var/app/source
+    tty: true
+    stdin_open: true
+    depends_on:
+      backend2_dev_volume_permissions:
+        condition: service_completed_successfully
+      backend2_db1:
+        condition: service_started
+
+  backend2_db1:
+    container_name: 'backend2_econas_db'
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: dcsdb
+      MYSQL_USER: st-user
+      MYSQL_PASSWORD: m8id5xc3
+      MYSQL_ROOT_PASSWORD: z3e6unh
+      character-set-server: utf8mb4
+      collation-server: utf8mb4_unicode_ci
+    volumes:
+      - backend2_econas_db1_data:/var/lib/mysql
+    networks:
+      - econas-network
+
+volumes:
+  backend2_efs_application:
+  backend2_ephemeral_storage_tmp:
+  backend2_econas_db1_data:
+
+networks:
+  econas-network:
+    name: econas-network
+    driver: bridge
+    external: true

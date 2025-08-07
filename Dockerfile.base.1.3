@@ -1,0 +1,152 @@
+# ------------------------------------------------------------------------------
+# ECONAS
+# アプリケーション用ベースイメージ
+#
+# Amazon Linux 2023.6.20250218.2
+# PHP - Amazon Linux 2023のリポジトリから最新版
+# node-22.13.1
+#
+#
+# 《ビルド方法》
+#
+# ■ ビルドに使用するPCと同じCPUアーキテクチャのイメージをビルドする場合
+# docker build --no-cache -t econas-app-base:1.3 -f Dockerfile.base.1.3 .
+#
+# ■ BuildXでマルチプラットフォーム向けにイメージをビルドする場合（例は x86_64 向け）
+# docker buildx build --load --no-cache --platform linux/amd64 -t econas-app-base:1.3-x86_64 -f Dockerfile.base.1.3 .
+#
+# ※ BuildXでマルチプラットフォーム向けにビルドする場合は、ローカルリポジトリコンテナをビルド前に起動しておく必要がある
+#
+#    《ローカルリポジトリの作成方法》
+#
+#    1) ローカルリポジトリ用のボリュームを作成する
+#       docker volume create registry-data
+#    2) ローカルリポジトリを作成する
+#       docker run -d -p 5001:5000 --restart=always --name local-registry -v registry-data:/var/lib/registry registry:latest
+#
+# ------------------------------------------------------------------------------
+
+
+FROM amazonlinux:2023.6.20250218.2
+# FROM --platform=$BUILDPLATFORM amazonlinux:2023.6.20250218.2
+
+
+# 引数
+# - Composer
+ARG COMPOSER_RELEASE_VERSION=2.8.5
+ARG COMPOSER_GITHUB_COMMIT_HASH=ae208dc1e182bd45d99fcecb956501da212454a1
+ARG COMPOSER_PATH=/usr/local/bin/composer
+# - Node
+ARG NODE_VERSION=22.13.1
+
+
+# 環境変数
+ENV \
+    # - ユーザー
+    DEFAULT_USER=root \
+    # - パス設定
+    PATH=/usr/local/bin:$PATH \
+    # - デフォルトのロケールを日本語に設定する
+    LANG=ja_JP.UTF-8 \
+    LANGUAGE=ja_JP.UTF-8 \
+    LC_ALL=ja_JP.UTF-8 \
+    # - Composer
+    COMPOSER_RELEASE_VERSION=${COMPOSER_RELEASE_VERSION} \
+    COMPOSER_GITHUB_COMMIT_HASH=${COMPOSER_GITHUB_COMMIT_HASH} \
+    COMPOSER_PATH=${COMPOSER_PATH}
+
+
+# タイムゾーンを日本に設定する
+RUN ln -sf /usr/share/zoneinfo/Asia/Tokyo /etc/localtime
+
+
+# 必要なパッケージをインストール
+RUN set -eux; \
+    yum update -y \
+    && \
+    dnf install -y \
+    shadow-utils \
+    glibc-langpack-ja \
+    logrotate \
+    cronie \
+    # - Httpd
+    httpd \
+    httpd-devel \
+    # - PHP関連パッケージ
+    php \
+    mod_php \
+    php-cli \
+    php-common \
+    php-devel \
+    php-gd \
+    php-mysqlnd \
+    php-mbstring \
+    php-pdo \
+    php-xml \
+    php-opcache \
+    php-fpm \
+    php-json \
+    php-curl \
+    php-zip \
+    php-intl \
+    php-bcmath \
+    php-soap \
+    php-fileinfo \
+    # - 開発ツール
+    gcc \
+    gcc-c++ \
+    make \
+    wget \
+    tar \
+    gzip \
+    zip \
+    unzip \
+    git \
+    vim \
+    \
+    python-pip \
+    # - Node.js
+    nodejs \
+    npm \
+    # - Admin tool
+    iotop \
+    htop \
+    socat \
+    wireshark-cli \
+    && \
+    # インストールされたPHPのバージョンを表示
+    php -v \
+    && \
+    # apacheの設定でPHPを有効化
+    echo "LoadModule php_module modules/libphp.so" > /etc/httpd/conf.modules.d/10-php.conf \
+    && \
+    echo "AddHandler php-script .php" >> /etc/httpd/conf.d/php.conf \
+    && \
+    echo "AddType text/html .php" >> /etc/httpd/conf.d/php.conf \
+    && \
+    echo "DirectoryIndex index.php" >> /etc/httpd/conf.d/php.conf \
+    && \
+    # クリーンアップ
+    yum clean all
+
+
+# Composer をインストールする
+RUN set -eux; \
+    cd /tmp && \
+    curl -sS https://getcomposer.org/installer -o composer-setup.php && \
+    php composer-setup.php --version=$COMPOSER_RELEASE_VERSION --install-dir=/usr/local/bin --filename=composer && \
+    rm composer-setup.php && \
+    chmod +x $COMPOSER_PATH
+
+
+# Node.js をバージョン管理するための n をインストール
+RUN set -eux; \
+    npm install -g n \
+    && n $NODE_VERSION
+# yum でインストールした Node.js を削除
+RUN set -eux; \
+    yum remove nodejs npm -y
+
+
+# ポート80を公開
+EXPOSE 80 443

@@ -1,0 +1,20 @@
+# ------------------------------------------------------------------------------
+# ECSクラスタ立ち上げ用イメージ
+#
+# ------------------------------------------------------------------------------
+FROM httpd:2.4.59
+
+
+# ELBのヘルスチェック用のHTMLファイルを作成する
+RUN set -eux; \
+    touch /usr/local/apache2/htdocs/health.html && \
+    echo "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"><title>health check</title></head><body><p>health check</p></body></html>" > /usr/local/apache2/htdocs/health.html
+
+# MySQLクライアントをインストール
+RUN apt-get update && apt-get install -y default-mysql-client
+
+# ポート8080で動作するようにApache設定を変更
+RUN sed -i 's/Listen 80/Listen 8080/' /usr/local/apache2/conf/httpd.conf
+
+
+EXPOSE 8080

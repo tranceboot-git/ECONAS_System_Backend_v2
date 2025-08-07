@@ -1,0 +1,11 @@
+${EFS_APPLICATION_MOUNT_PATH}/logs/httpd/*log {
+    size 1M
+    create 644 1000 1000
+    daily
+    rotate 7
+    missingok
+    notifempty
+    postrotate
+        /usr/sbin/apachectl graceful > /dev/null 2>/1 || true
+    endscript
+}
